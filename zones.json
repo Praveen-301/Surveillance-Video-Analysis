@@ -1,0 +1,16 @@
+[
+  {
+    "name"         : "Restricted Zone A",
+    "polygon"      : [[100,100],[400,100],[400,400],[100,400]],
+    "loitering_sec": 10,
+    "crowd_max"    : 3,
+    "severity"     : "CRITICAL"
+  },
+  {
+    "name"         : "Public Corridor",
+    "polygon"      : [[400,0],[1280,0],[1280,720],[400,720]],
+    "loitering_sec": 60,
+    "crowd_max"    : 20,
+    "severity"     : "MEDIUM"
+  }
+]

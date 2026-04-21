@@ -1,0 +1,56 @@
+# ── Model weights (large binary files) ────────────────────────────────────────
+models/
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# ── Runtime output files ───────────────────────────────────────────────────────
+input/
+output/
+saved_frames/
+*.mp4
+*.avi
+heatmap_final.png
+clip_index.pt
+
+# ── Database ───────────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+
+# ── Verification / scratch frames ─────────────────────────────────────────────
+verification_frame_*.jpg
+late_verification_frame_*.jpg
+frame_*.jpg
+
+# ── Logs & debug outputs ───────────────────────────────────────────────────────
+*.log
+*.txt
+!README.md
+
+# ── Python cache ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+HyViS_env/
+*_env/
+
+# ── IDE / editor ───────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Streamlit ──────────────────────────────────────────────────────────────────
+.streamlit/
