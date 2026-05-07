@@ -1,16 +1,15 @@
 import cv2, argparse, os, numpy as np
+from typing import Dict
 from modules.pose      import PoseEstimator
 from modules.action    import ActionRecognizer
 from modules.weapon    import WeaponDetector
-from modules.watchlist import WatchlistMatcher
 from modules.zones     import ZoneRulesEngine
-from modules.crowd     import CrowdDensityEstimator
 from modules.surge     import SurgeDetector
 from modules.fusion    import fuse
 from modules.heatmap   import HeatmapEngine
 from modules.db        import DBManager
 
-SAVE_EVERY = 25   # save 1 frame every 25 for CLIP
+SAVE_EVERY = 25   # save annotated frame every N frames
 
 # COCO 17-keypoint skeleton bone pairs
 BONES = [
@@ -42,7 +41,7 @@ def draw_skeleton(frame, kp, W, H, dot_color=(255, 165, 0), line_color=(0, 200, 
         if pt:
             cv2.circle(frame, pt, 3, dot_color, -1)
 
-def main(video_path, output_path):
+def main(video_path: str, output_path: str, do_index: bool = False) -> None:
     # Capture absolute paths BEFORE changing directory
     video_path  = os.path.abspath(video_path)
     output_path = os.path.abspath(output_path)
@@ -68,15 +67,14 @@ def main(video_path, output_path):
     pose  = PoseEstimator()
     act   = ActionRecognizer()
     wpn   = WeaponDetector()
-    wtch  = WatchlistMatcher()
     zone  = ZoneRulesEngine("zones.json")
-    csr   = CrowdDensityEstimator()
     surge = SurgeDetector()
     hmap  = HeatmapEngine(H, W)
     db    = DBManager("surveillance.db")
 
-    frame_idx = 0
-    prev_gray = None
+    frame_idx         = 0
+    prev_gray         = None
+    physical_signals: Dict[int, Dict] = {}   # frame_idx -> signal snapshot for FCVAR
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -119,27 +117,31 @@ def main(video_path, output_path):
                 wcy = int((t["bbox"][1]+t["bbox"][3])/2)
                 hmap.update(wcx, wcy)
 
-        if frame_idx % 5 == 0:
-            matches = wtch.match(frame)
-            if matches:
-                signals["face_match"] = matches[0]["conf"]
-
-        if frame_idx % 50 == 0:
-            count, _ = csr.estimate(frame)
-            if count > 20:
-                signals["crowd"] = min(count/50.0, 1.0)
-
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if prev_gray is not None:
             sv = surge.detect(prev_gray, gray)
             if sv > 0.5: signals["surge"] = sv
         prev_gray = gray
 
+        # ----------------------------------------------------------------
+        # Compute fused score & log HIGH/CRITICAL alerts
+        # ----------------------------------------------------------------
+        fusion_score = 0.0
         if signals:
-            score, severity = fuse(signals)
-            if severity in ("HIGH","CRITICAL"):
+            fusion_score, severity = fuse(signals)
+            if severity in ("HIGH", "CRITICAL"):
                 db.log(severity, frame_idx, signals)
                 print(f"Frame {frame_idx:05d} | {severity:8s} | {signals}")
+
+        # Collect physical snapshot for FCVAR indexing (every frame)
+        physical_signals[frame_idx] = {
+            "weapon_score"  : float(signals.get("weapon",    0.0)),
+            "action_score"  : float(signals.get("action",    0.0)),
+            "zone_violation": int("loitering" in signals),
+            "surge_score"   : float(signals.get("surge",     0.0)),
+            "fusion_score"  : round(fusion_score, 4),
+            "track_ids"     : [p["tid"] for p in all_persons if p["tid"] is not None],
+        }
 
         # --- Visual Overlay ---
         frame = hmap.apply_overlay(frame, alpha=0.35)
@@ -189,12 +191,26 @@ def main(video_path, output_path):
             print(f"  [{frame_idx}/{total}] frames")
 
     cap.release(); out.release()
-    print(f"Done: {output_path}")
-    print(f"Frames saved for CLIP: {len(os.listdir('saved_frames'))}")
+    hmap.snapshot("heatmap_final.png")
+    print(f"\nDone: {output_path}")
+
+    # ------------------------------------------------------------------
+    # Optional FCVAR indexing (triggered by --index flag)
+    # ------------------------------------------------------------------
+    if do_index:
+        print("\nStarting FCVAR indexing…")
+        try:
+            from modules.retrieval import FCVARManager
+            mgr = FCVARManager()
+            mgr.index_video(video_path, physical_signals, sample_fps=1.0)
+            print("FCVAR indexing complete.")
+        except Exception as exc:
+            print(f"FCVAR indexing failed: {exc}")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--video",  required=True)
-    ap.add_argument("--output", default="output_annotated.mp4")
+    ap.add_argument("--video",   required=True,       help="Path to input video")
+    ap.add_argument("--output",  default="output_annotated.mp4", help="Output annotated video")
+    ap.add_argument("--index",   action="store_true", help="Run FCVAR indexing after processing")
     args = ap.parse_args()
-    main(args.video, args.output)
+    main(args.video, args.output, args.index)
